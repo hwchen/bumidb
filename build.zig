@@ -22,4 +22,13 @@ pub fn build(b: *std.build.Builder) void {
     kv_exe.install();
     const kv_step = b.step("kv", "Build kv cli");
     kv_step.dependOn(&kv_exe.step);
+
+    const run_kv_cmd = kv_exe.run();
+    run_kv_cmd.step.dependOn(b.getInstallStep());
+    if (b.args) |args| {
+        run_kv_cmd.addArgs(args);
+    }
+
+    const run_kv_step = b.step("run-kv", "Build and run kv cli");
+    run_kv_step.dependOn(&run_kv_cmd.step);
 }

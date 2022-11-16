@@ -4,7 +4,7 @@ const rdb = @cImport(@cInclude("rocksdb/c.h"));
 pub fn main() anyerror!void {
     var db = try RocksDb.open("data");
     defer db.close();
-    std.debug.print("Opened db?", .{});
+    std.debug.print("Opened db\n", .{});
 }
 
 pub const RocksDb = struct {
