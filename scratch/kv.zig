@@ -6,13 +6,13 @@ const rdb = @cImport(@cInclude("rocksdb/c.h"));
 const m = std.heap.c_allocator;
 
 pub fn main() anyerror!void {
-    var db = try RocksDb.open("data");
+    var db = try RocksDb.open("/tmp/bumidb");
     defer db.close();
     std.debug.print("Opened db\n", .{});
 
     try db.set("test_key", "test_value");
     const test_val = try db.get("test_key");
-    defer m.free(test_val);
+    defer RocksDb.deinit_string(test_val);
     std.debug.print("get value: {s}\n", .{test_val});
 }
 
@@ -20,6 +20,13 @@ pub const RocksDb = struct {
     db: *rdb.rocksdb_t,
 
     const Self = @This();
+
+    /// A string allocated by rocksdb. Must be freed by caller.
+    const String = []const u8;
+
+    pub fn deinit_string(str: String) void {
+        m.free(str);
+    }
 
     pub fn open(dir: []const u8) !Self {
         const options = rdb.rocksdb_options_create();
@@ -40,7 +47,7 @@ pub const RocksDb = struct {
         rdb.rocksdb_close(self.db);
     }
 
-    pub fn get(self: Self, key: [:0]const u8) ![]const u8 {
+    pub fn get(self: Self, key: [:0]const u8) !String {
         const read_options = rdb.rocksdb_readoptions_create();
         defer rdb.rocksdb_readoptions_destroy(read_options);
 
