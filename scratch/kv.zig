@@ -18,6 +18,8 @@ pub fn main() anyerror!void {
 
 pub const RocksDb = struct {
     db: *rdb.rocksdb_t,
+    read_options: ?*rdb.rocksdb_readoptions_t,
+    write_options: ?*rdb.rocksdb_writeoptions_t,
 
     const Self = @This();
 
@@ -40,22 +42,25 @@ pub const RocksDb = struct {
             return error.RocksDbOpen;
         }
 
-        return .{ .db = db orelse return error.RocksDbFail };
+        return .{
+            .db = db orelse return error.RocksDbFail,
+            .read_options = rdb.rocksdb_readoptions_create(),
+            .write_options = rdb.rocksdb_writeoptions_create(),
+        };
     }
 
     pub fn close(self: Self) void {
+        rdb.rocksdb_readoptions_destroy(self.read_options);
+        rdb.rocksdb_writeoptions_destroy(self.write_options);
         rdb.rocksdb_close(self.db);
     }
 
     pub fn get(self: Self, key: [:0]const u8) !String {
-        const read_options = rdb.rocksdb_readoptions_create();
-        defer rdb.rocksdb_readoptions_destroy(read_options);
-
         var err: ?[*:0]u8 = null;
         var val_len: usize = 0;
         const val = rdb.rocksdb_get(
             self.db,
-            read_options,
+            self.read_options,
             key.ptr,
             key.len,
             &val_len,
@@ -70,13 +75,10 @@ pub const RocksDb = struct {
     }
 
     pub fn set(self: Self, key: [:0]const u8, value: [:0]const u8) !void {
-        const write_options = rdb.rocksdb_writeoptions_create();
-        defer rdb.rocksdb_writeoptions_destroy(write_options);
-
         var err: ?[*:0]u8 = null;
         rdb.rocksdb_put(
             self.db,
-            write_options,
+            self.write_options,
             key.ptr,
             key.len,
             value.ptr,
