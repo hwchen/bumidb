@@ -19,7 +19,7 @@ pub fn build(b: *std.build.Builder) void {
     kv_exe.addLibraryPath("./rocksdb");
     kv_exe.addIncludePath("./rocksdb/include");
     kv_exe.setBuildMode(mode);
-    kv_exe.install();
+    kv_exe.install(); // TODO this is not installing to zig-out?
     const kv_step = b.step("kv", "Build kv cli");
     kv_step.dependOn(&kv_exe.step);
 
