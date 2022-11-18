@@ -31,4 +31,15 @@ pub fn build(b: *std.build.Builder) void {
 
     const run_kv_step = b.step("run-kv", "Build and run kv cli");
     run_kv_step.dependOn(&run_kv_cmd.step);
+
+    // kv tests
+    const kv_tests = b.addTest("scratch/kv.zig");
+    kv_tests.setBuildMode(mode);
+    kv_tests.linkLibC();
+    kv_tests.linkSystemLibraryName("rocksdb");
+    kv_tests.addLibraryPath("./rocksdb");
+    kv_tests.addIncludePath("./rocksdb/include");
+
+    const kv_test_step = b.step("test-kv", "Run kv tests");
+    kv_test_step.dependOn(&kv_tests.step);
 }

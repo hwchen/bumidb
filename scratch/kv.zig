@@ -4,6 +4,7 @@
 const std = @import("std");
 const rdb = @cImport(@cInclude("rocksdb/c.h"));
 const m = std.heap.c_allocator;
+const tmpDir = std.testing.tmpDir;
 
 pub fn main() anyerror!void {
     var db = try RocksDb.open("/tmp/bumidb");
@@ -114,26 +115,32 @@ pub const RocksDb = struct {
     pub const Iter = struct {
         iter: *rdb.rocksdb_iterator_t,
 
-        pub fn next(self: *Iter) ?IterEntry {
-            if (rdb.rocksdb_iter_valid(self.iter) != 1) {
-                return null;
-            }
+        pub fn seek_to_first(self: Iter) void {
+            rdb.rocksdb_iter_seek_to_first(self.iter);
+        }
 
+        pub fn valid(self: Iter) bool {
+            return rdb.rocksdb_iter_valid(self.iter) == 1;
+        }
+
+        pub fn current_entry(self: Iter) IterEntry {
+            // rdb no malloc for iterator `get`
             var key_size: usize = 0;
             const key = rdb.rocksdb_iter_key(self.iter, &key_size);
             var value_size: usize = 0;
             const value = rdb.rocksdb_iter_value(self.iter, &value_size);
+            std.debug.print("inside next: {s}, {s}\n", .{ key[0..key_size], value[0..value_size] });
 
             const res = IterEntry{
                 .key = key[0..key_size],
                 .value = value[0..value_size],
             };
 
-            // Iter initialized at first element, so increment at end of `next`.
-            // rdb no malloc for iterator `get`
-            rdb.rocksdb_iter_next(self.iter);
-
             return res;
+        }
+
+        pub fn next(self: Iter) void {
+            rdb.rocksdb_iter_next(self.iter);
         }
 
         pub fn deinit(self: Iter) void {
@@ -143,12 +150,64 @@ pub const RocksDb = struct {
 
     // TODO: prefix
     pub fn iter(self: Self) !Iter {
-        const it = Iter{
+        return Iter{
             .iter = rdb.rocksdb_create_iterator(self.db, self.read_options) orelse return error.IteratorCreationFail,
         };
-
-        rdb.rocksdb_iter_seek_to_first(it.iter);
-
-        return it;
     }
 };
+
+// TODO hook up valgrind to test to check for leak
+test "get" {
+    var tmp = tmpDir(.{});
+    defer tmp.cleanup();
+
+    var db = try RocksDb.open(&tmp.sub_path);
+    defer db.close();
+
+    try db.set("test_key_1", "test_value_1");
+    const test_val = (try db.get("test_key_1")).?;
+    defer RocksDb.deinit_string(test_val);
+    try std.testing.expectEqualSlices(u8, "test_value_1", test_val);
+    try std.testing.expectEqual(try db.get("missing"), null);
+}
+
+test "iterator" {
+    var tmp = tmpDir(.{});
+    defer tmp.cleanup();
+
+    var db = try RocksDb.open(&tmp.sub_path);
+    defer db.close();
+
+    // insert out of order
+    try db.set("test_key_3", "test_value_3");
+    try db.set("test_key_2", "test_value_2");
+    try db.set("test_key_1", "test_value_1");
+
+    // iterator should be in order
+    // this is an unrolled loop
+    var it = try db.iter();
+    defer it.deinit();
+    it.seek_to_first();
+    {
+        try std.testing.expect(it.valid());
+        const entry = it.current_entry();
+        try std.testing.expectEqualSlices(u8, "test_key_1", entry.key);
+        try std.testing.expectEqualSlices(u8, "test_value_1", entry.value);
+    }
+    {
+        it.next();
+        try std.testing.expect(it.valid());
+        const entry = it.current_entry();
+        try std.testing.expectEqualSlices(u8, "test_key_2", entry.key);
+        try std.testing.expectEqualSlices(u8, "test_value_2", entry.value);
+    }
+    {
+        it.next();
+        try std.testing.expect(it.valid());
+        const entry = it.current_entry();
+        try std.testing.expectEqualSlices(u8, "test_key_3", entry.key);
+        try std.testing.expectEqualSlices(u8, "test_value_3", entry.value);
+    }
+    it.next();
+    try std.testing.expect(!it.valid());
+}
