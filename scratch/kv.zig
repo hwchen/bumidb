@@ -129,7 +129,6 @@ pub const RocksDb = struct {
             const key = rdb.rocksdb_iter_key(self.iter, &key_size);
             var value_size: usize = 0;
             const value = rdb.rocksdb_iter_value(self.iter, &value_size);
-            std.debug.print("inside next: {s}, {s}\n", .{ key[0..key_size], value[0..value_size] });
 
             const res = IterEntry{
                 .key = key[0..key_size],
