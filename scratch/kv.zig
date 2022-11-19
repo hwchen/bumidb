@@ -41,7 +41,9 @@ pub const RocksDb = struct {
         m.free(str);
     }
 
-    pub fn open(dir: []const u8) !Self {
+    /// Enforces null-terminated slice for dir path, so that we don't have to allocate
+    /// another slice to convert to null-terminated.
+    pub fn open(dir: [:0]const u8) !Self {
         const options = rdb.rocksdb_options_create();
         rdb.rocksdb_options_set_create_if_missing(options, 1);
         defer rdb.rocksdb_options_destroy(options);
@@ -157,10 +159,14 @@ pub const RocksDb = struct {
 
 // TODO hook up valgrind to test to check for leak
 test "get" {
+    const alloc = std.testing.allocator;
+
     var tmp = tmpDir(.{});
     defer tmp.cleanup();
 
-    var db = try RocksDb.open(&tmp.sub_path);
+    const db_path = try std.fs.path.joinZ(alloc, &[_][]const u8{ "zig-cache", "tmp", tmp.sub_path[0..] });
+    defer alloc.free(db_path);
+    var db = try RocksDb.open(db_path);
     defer db.close();
 
     try db.set("test_key_1", "test_value_1");
@@ -171,10 +177,23 @@ test "get" {
 }
 
 test "iterator" {
+    const alloc = std.testing.allocator;
+
     var tmp = tmpDir(.{});
     defer tmp.cleanup();
 
-    var db = try RocksDb.open(&tmp.sub_path);
+    // NOTE: wrestled w/ this a long time. Kept getting "file too long" when using just `join`. I finally
+    // read my `open` code and realized that just a ptr (and no length) was being passed as the path to
+    // open. `join` doesn't have null terminator, so it would just read forever.
+    //
+    // Because I don't want to recreate an array w/in `open` that's null terminated, I have the path parameter
+    // require a null-terminated slice. Then it's up to the caller to create it correctly in the first place.
+    // In this case, that means using `joinz` instead of `join`.
+    //
+    // realPath doesn't appear to output null-terminated slices.
+    const db_path = try std.fs.path.joinZ(alloc, &[_][]const u8{ "zig-cache", "tmp", tmp.sub_path[0..] });
+    defer alloc.free(db_path);
+    var db = try RocksDb.open(db_path);
     defer db.close();
 
     // insert out of order
