@@ -54,7 +54,6 @@ pub const RocksDb = struct {
             .db = db orelse return error.RocksDbFail,
             .read_options = rdb.rocksdb_readoptions_create(),
             .write_options = rdb.rocksdb_writeoptions_create(),
-            .slice_transofmr = slice_transform,
         };
     }
 
@@ -79,7 +78,7 @@ pub const RocksDb = struct {
     }
 
     // Return value is malloc'd, need to call `free` on it.
-    pub fn get(self: Self, key: [:0]const u8) !?String {
+    pub fn get(self: Self, key: []const u8) !?String {
         var err: ?[*:0]u8 = null;
         var val_len: usize = 0;
         const val = rdb.rocksdb_get(
