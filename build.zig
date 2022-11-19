@@ -10,7 +10,7 @@ pub fn build(b: *std.build.Builder) void {
         const main_tests = b.addTest("src/main.zig");
         main_tests.setBuildMode(mode);
 
-        const storage_tests = b.addTest("./src/storage.zig");
+        const storage_tests = b.addTest("./src/rocksdb.zig");
         storage_tests.setBuildMode(mode);
         storage_tests.linkLibC();
         storage_tests.linkSystemLibraryName("rocksdb");

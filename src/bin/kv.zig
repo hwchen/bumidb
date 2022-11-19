@@ -1,5 +1,5 @@
 const std = @import("std");
-const RocksDb = @import("bumi").storage.RocksDb;
+const RocksDb = @import("bumi").rocksdb.RocksDb;
 
 pub fn main() anyerror!void {
     var db = try RocksDb.open("/tmp/bumidb");
