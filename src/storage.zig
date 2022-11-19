@@ -22,7 +22,9 @@ pub fn main() anyerror!void {
 
     var it = try db.iter();
     defer it.deinit();
-    while (it.next()) |entry| {
+    it.seek_to_first();
+    while (it.valid()) : (it.next()) {
+        const entry = it.current_entry();
         std.debug.print("iter: {s}: {s}\n", .{ entry.key, entry.value });
     }
 }
