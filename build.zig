@@ -5,15 +5,26 @@ pub fn build(b: *std.build.Builder) void {
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
     const mode = b.standardReleaseOptions();
 
-    const main_tests = b.addTest("src/main.zig");
-    main_tests.setBuildMode(mode);
+    // Tests
+    {
+        const main_tests = b.addTest("src/main.zig");
+        main_tests.setBuildMode(mode);
 
-    const test_step = b.step("test", "Run library tests");
-    test_step.dependOn(&main_tests.step);
+        const storage_tests = b.addTest("./src/storage.zig");
+        storage_tests.setBuildMode(mode);
+        storage_tests.linkLibC();
+        storage_tests.linkSystemLibraryName("rocksdb");
+        storage_tests.addLibraryPath("./rocksdb");
+        storage_tests.addIncludePath("./rocksdb/include");
+
+        const test_step = b.step("test", "Run library tests");
+        test_step.dependOn(&main_tests.step);
+        test_step.dependOn(&storage_tests.step);
+    }
 
     // kv executable
-    const kv_exe = b.addExecutable("kv", "./src/storage.zig");
-    kv_exe.addPackagePath("bumidb", "./src/main.zig");
+    const kv_exe = b.addExecutable("kv", "./src/bin/kv.zig");
+    kv_exe.addPackagePath("bumi", "./src/main.zig");
     kv_exe.linkLibC();
     kv_exe.linkSystemLibraryName("rocksdb");
     kv_exe.addLibraryPath("./rocksdb");
@@ -31,15 +42,4 @@ pub fn build(b: *std.build.Builder) void {
 
     const run_kv_step = b.step("run-kv", "Build and run kv cli");
     run_kv_step.dependOn(&run_kv_cmd.step);
-
-    // kv tests
-    const kv_tests = b.addTest("./src/storage.zig");
-    kv_tests.setBuildMode(mode);
-    kv_tests.linkLibC();
-    kv_tests.linkSystemLibraryName("rocksdb");
-    kv_tests.addLibraryPath("./rocksdb");
-    kv_tests.addIncludePath("./rocksdb/include");
-
-    const kv_test_step = b.step("test-kv", "Run kv tests");
-    kv_test_step.dependOn(&kv_tests.step);
 }
