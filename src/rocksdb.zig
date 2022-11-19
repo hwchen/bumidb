@@ -7,6 +7,7 @@ pub const RocksDb = struct {
     db: *rdb.rocksdb_t,
     read_options: ?*rdb.rocksdb_readoptions_t,
     write_options: ?*rdb.rocksdb_writeoptions_t,
+    // TODO do I need to store slice_transform here? Currently being leaked
 
     const Self = @This();
 
@@ -19,10 +20,28 @@ pub const RocksDb = struct {
 
     /// Enforces null-terminated slice for dir path, so that we don't have to allocate
     /// another slice to convert to null-terminated.
-    pub fn open(dir: [:0]const u8) !Self {
+    pub fn open(dir: [:0]const u8, open_options: OpenOptions) !Self {
         const options = rdb.rocksdb_options_create();
         rdb.rocksdb_options_set_create_if_missing(options, 1);
         defer rdb.rocksdb_options_destroy(options);
+
+        // prefix extractor setup
+        // When only the prefix extractor is set, order is guaranteed only for keys of the same
+        // prefix, not for total order. We do _not_ set `ReadOption.total_order_seek=true`.
+        {
+            const slice_transform = blk: {
+                if (open_options.prefix_extractor) |extractor| {
+                    switch (extractor.kind) {
+                        .fixed => {
+                            break :blk rdb.rocksdb_slicetransform_create_fixed_prefix(extractor.len);
+                        },
+                    }
+                } else {
+                    break :blk rdb.rocksdb_slicetransform_create_noop();
+                }
+            };
+            rdb.rocksdb_options_set_prefix_extractor(options, slice_transform);
+        }
 
         var err: ?[*:0]u8 = null;
         var db = rdb.rocksdb_open(options, dir.ptr, &err);
@@ -37,6 +56,20 @@ pub const RocksDb = struct {
             .write_options = rdb.rocksdb_writeoptions_create(),
         };
     }
+
+    pub const OpenOptions = struct {
+        prefix_extractor: ?PrefixExtractor = null,
+
+        pub const PrefixExtractor = struct {
+            kind: Kind,
+            len: usize,
+
+            pub const Kind = enum {
+                // C api only allows fixed, not capped?
+                fixed,
+            };
+        };
+    };
 
     pub fn close(self: Self) void {
         rdb.rocksdb_readoptions_destroy(self.read_options);
@@ -93,6 +126,10 @@ pub const RocksDb = struct {
     pub const Iter = struct {
         iter: *rdb.rocksdb_iterator_t,
 
+        pub fn seek(self: Iter, target: []const u8) void {
+            rdb.rocksdb_iter_seek(self.iter, target.ptr, target.len);
+        }
+
         pub fn seek_to_first(self: Iter) void {
             rdb.rocksdb_iter_seek_to_first(self.iter);
         }
@@ -120,12 +157,20 @@ pub const RocksDb = struct {
             rdb.rocksdb_iter_next(self.iter);
         }
 
+        pub fn current_key_starts_with(self: Iter, prefix: []const u8) bool {
+            var key_size: usize = 0;
+            const key = rdb.rocksdb_iter_key(self.iter, &key_size);
+            if (prefix.len < key_size) {
+                return std.mem.startsWith(u8, key[0..key_size], prefix);
+            }
+            return false;
+        }
+
         pub fn deinit(self: Iter) void {
             rdb.rocksdb_iter_destroy(self.iter);
         }
     };
 
-    // TODO: basic prefix (don't use rocksdb prefix bloom filter yet)
     pub fn iter(self: Self) !Iter {
         return Iter{
             .iter = rdb.rocksdb_create_iterator(self.db, self.read_options) orelse return error.IteratorCreationFail,
@@ -141,7 +186,7 @@ test "get" {
 
     const db_path = try std.fs.path.joinZ(alloc, &[_][]const u8{ "zig-cache", "tmp", tmp.sub_path[0..] });
     defer alloc.free(db_path);
-    var db = try RocksDb.open(db_path);
+    var db = try RocksDb.open(db_path, .{});
     defer db.close();
 
     try db.set("test_key_1", "test_value_1");
@@ -168,15 +213,16 @@ test "iterator" {
     // realPath doesn't appear to output null-terminated slices.
     const db_path = try std.fs.path.joinZ(alloc, &[_][]const u8{ "zig-cache", "tmp", tmp.sub_path[0..] });
     defer alloc.free(db_path);
-    var db = try RocksDb.open(db_path);
+    var db = try RocksDb.open(db_path, .{});
     defer db.close();
 
     // insert out of order
     try db.set("test_key_3", "test_value_3");
     try db.set("test_key_2", "test_value_2");
-    try db.set("test_key_1", "test_value_1");
+    try db.set("different_prefix_test_key_1", "test_value_1");
 
     // iterator should be in order
+    // and iterate over all prefixes (total)
     // this is an unrolled loop
     var it = try db.iter();
     defer it.deinit();
@@ -184,7 +230,7 @@ test "iterator" {
     {
         try std.testing.expect(it.valid());
         const entry = it.current_entry();
-        try std.testing.expectEqualSlices(u8, "test_key_1", entry.key);
+        try std.testing.expectEqualSlices(u8, "different_prefix_test_key_1", entry.key);
         try std.testing.expectEqualSlices(u8, "test_value_1", entry.value);
     }
     {
@@ -203,4 +249,72 @@ test "iterator" {
     }
     it.next();
     try std.testing.expect(!it.valid());
+}
+
+// TODO benchmark to see when it's faster than w/out prefix iterator.
+test "prefix iterator" {
+    const alloc = std.testing.allocator;
+
+    var tmp = tmpDir(.{});
+    defer tmp.cleanup();
+
+    const db_path = try std.fs.path.joinZ(alloc, &[_][]const u8{ "zig-cache", "tmp", tmp.sub_path[0..] });
+    defer alloc.free(db_path);
+    // This should also work w/out the prefix extractor.
+    var db = try RocksDb.open(db_path, .{ .prefix_extractor = .{ .kind = .fixed, .len = 3 } });
+    defer db.close();
+
+    // foo prefix
+    try db.set("foo_1", "1");
+    try db.set("foo_2", "2");
+
+    // bar prefix
+    try db.set("bar_1", "1");
+    try db.set("bar_2", "2");
+
+    // should iterate for foo prefix only
+    {
+        var it = try db.iter();
+        defer it.deinit();
+        it.seek("foo");
+        {
+            try std.testing.expect(it.valid());
+            const entry = it.current_entry();
+            try std.testing.expectEqualSlices(u8, "foo_1", entry.key);
+            try std.testing.expectEqualSlices(u8, "1", entry.value);
+        }
+        {
+            it.next();
+            try std.testing.expect(it.valid());
+            const entry = it.current_entry();
+            try std.testing.expectEqualSlices(u8, "foo_2", entry.key);
+            try std.testing.expectEqualSlices(u8, "2", entry.value);
+        }
+        it.next();
+        try std.testing.expect(!it.valid());
+    }
+    // should iterate for bar prefix only
+    {
+        var it = try db.iter();
+        defer it.deinit();
+        it.seek("bar");
+        {
+            try std.testing.expect(it.valid());
+            const entry = it.current_entry();
+            try std.testing.expectEqualSlices(u8, "bar_1", entry.key);
+            try std.testing.expectEqualSlices(u8, "1", entry.value);
+        }
+        {
+            it.next();
+            try std.testing.expect(it.valid());
+            const entry = it.current_entry();
+            try std.testing.expectEqualSlices(u8, "bar_2", entry.key);
+            try std.testing.expectEqualSlices(u8, "2", entry.value);
+        }
+        it.next();
+        try std.testing.expect(it.valid());
+        // `next` can go across the boundary to a different prefix, so
+        // check the end condition
+        try std.testing.expect(!it.current_key_starts_with("bar"));
+    }
 }
