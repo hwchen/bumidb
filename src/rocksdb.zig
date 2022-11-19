@@ -7,7 +7,6 @@ pub const RocksDb = struct {
     db: *rdb.rocksdb_t,
     read_options: ?*rdb.rocksdb_readoptions_t,
     write_options: ?*rdb.rocksdb_writeoptions_t,
-    // TODO do I need to store slice_transform here? Currently being leaked
 
     const Self = @This();
 
@@ -28,20 +27,21 @@ pub const RocksDb = struct {
         // prefix extractor setup
         // When only the prefix extractor is set, order is guaranteed only for keys of the same
         // prefix, not for total order. We do _not_ set `ReadOption.total_order_seek=true`.
-        {
-            const slice_transform = blk: {
-                if (open_options.prefix_extractor) |extractor| {
-                    switch (extractor.kind) {
-                        .fixed => {
-                            break :blk rdb.rocksdb_slicetransform_create_fixed_prefix(extractor.len);
-                        },
-                    }
-                } else {
-                    break :blk rdb.rocksdb_slicetransform_create_noop();
+        //
+        // Also, looks like this doesn't need to be freed? Does that mean the `db.close()` destroys?
+        // Don't see any leak in valgrind.
+        const slice_transform = blk: {
+            if (open_options.prefix_extractor) |extractor| {
+                switch (extractor.kind) {
+                    .fixed => {
+                        break :blk rdb.rocksdb_slicetransform_create_fixed_prefix(extractor.len);
+                    },
                 }
-            };
-            rdb.rocksdb_options_set_prefix_extractor(options, slice_transform);
-        }
+            } else {
+                break :blk rdb.rocksdb_slicetransform_create_noop();
+            }
+        };
+        rdb.rocksdb_options_set_prefix_extractor(options, slice_transform);
 
         var err: ?[*:0]u8 = null;
         var db = rdb.rocksdb_open(options, dir.ptr, &err);
@@ -54,6 +54,7 @@ pub const RocksDb = struct {
             .db = db orelse return error.RocksDbFail,
             .read_options = rdb.rocksdb_readoptions_create(),
             .write_options = rdb.rocksdb_writeoptions_create(),
+            .slice_transofmr = slice_transform,
         };
     }
 

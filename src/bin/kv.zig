@@ -2,7 +2,7 @@ const std = @import("std");
 const RocksDb = @import("bumi").rocksdb.RocksDb;
 
 pub fn main() anyerror!void {
-    var db = try RocksDb.open("/tmp/bumidb");
+    var db = try RocksDb.open("/tmp/bumidb", .{ .prefix_extractor = .{ .kind = .fixed, .len = 3 } });
     defer db.close();
     std.debug.print("Opened db\n", .{});
 
