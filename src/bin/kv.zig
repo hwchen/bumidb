@@ -7,10 +7,13 @@ pub fn main() anyerror!void {
     defer arena.deinit();
     const alloc = arena.allocator();
 
-    var db = try RocksDb.open("/tmp/bumidb", .{});
+    const opts = try Opts.parse(alloc); // let arena allocator clean up
+
+    const db_path = opts.db_path orelse "/tmp/bumidb";
+    std.debug.print("Opening database at {s}:\n", .{db_path});
+    var db = try RocksDb.open(db_path, .{});
     defer db.close();
 
-    const opts = try Opts.parse(alloc); // let arena allocator clean up
     switch (opts.command) {
         .set => |s| try db.set(s.key, s.value),
         .get => |g| {
@@ -39,6 +42,7 @@ pub fn main() anyerror!void {
 
 const Opts = struct {
     arg_iter: std.process.ArgIterator,
+    db_path: ?[:0]const u8,
     command: Command,
 
     const Command = union(enum) {
@@ -65,16 +69,42 @@ const Opts = struct {
         var args = try std.process.argsWithAllocator(alloc);
         _ = args.skip();
 
-        const command = args.next() orelse return error.NoCommand;
+        var command: [:0]const u8 = undefined;
+        const command_or_pathflag = args.next() orelse return error.NoCommandOrPathFlag;
+
+        // first check if it's --db-path, which has to come before the command.
+        const db_path = blk: {
+            if (std.mem.eql(u8, "--db-path", command_or_pathflag)) {
+                const path = args.next() orelse return error.NoDbPath;
+                command = args.next() orelse return error.NoCommand;
+                break :blk path;
+            } else {
+                command = command_or_pathflag;
+                break :blk null;
+            }
+        };
+
         if (std.ascii.eqlIgnoreCase("get", command)) {
             const target = args.next() orelse return error.GetNoTarget;
-            return .{ .command = .{ .get = .{ .target = target } }, .arg_iter = args };
+            return .{
+                .arg_iter = args,
+                .db_path = db_path,
+                .command = .{ .get = .{ .target = target } },
+            };
         } else if (std.ascii.eqlIgnoreCase("set", command)) {
             const key = args.next() orelse return error.SetNoKey;
             const value = args.next() orelse return error.SetNoValue;
-            return .{ .command = .{ .set = .{ .key = key, .value = value } }, .arg_iter = args };
+            return .{
+                .arg_iter = args,
+                .db_path = db_path,
+                .command = .{ .set = .{ .key = key, .value = value } },
+            };
         } else if (std.ascii.eqlIgnoreCase("list", command)) {
-            return .{ .command = .{ .list = .{ .prefix = args.next() } }, .arg_iter = args };
+            return .{
+                .arg_iter = args,
+                .db_path = db_path,
+                .command = .{ .list = .{ .prefix = args.next() } },
+            };
         } else {
             return error.CommandNotFound;
         }
