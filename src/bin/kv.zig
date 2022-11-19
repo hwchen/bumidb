@@ -23,3 +23,5 @@ pub fn main() anyerror!void {
         std.debug.print("iter: {s}: {s}\n", .{ entry.key, entry.value });
     }
 }
+
+// TODO parse cli

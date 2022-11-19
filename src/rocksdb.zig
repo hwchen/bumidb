@@ -125,7 +125,7 @@ pub const RocksDb = struct {
         }
     };
 
-    // TODO: prefix
+    // TODO: basic prefix (don't use rocksdb prefix bloom filter yet)
     pub fn iter(self: Self) !Iter {
         return Iter{
             .iter = rdb.rocksdb_create_iterator(self.db, self.read_options) orelse return error.IteratorCreationFail,
@@ -133,7 +133,6 @@ pub const RocksDb = struct {
     }
 };
 
-// TODO hook up valgrind to test to check for leak
 test "get" {
     const alloc = std.testing.allocator;
 
