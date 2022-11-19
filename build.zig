@@ -12,7 +12,7 @@ pub fn build(b: *std.build.Builder) void {
     test_step.dependOn(&main_tests.step);
 
     // kv executable
-    const kv_exe = b.addExecutable("kv", "./scratch/kv.zig");
+    const kv_exe = b.addExecutable("kv", "./src/storage.zig");
     kv_exe.addPackagePath("bumidb", "./src/main.zig");
     kv_exe.linkLibC();
     kv_exe.linkSystemLibraryName("rocksdb");
@@ -33,7 +33,7 @@ pub fn build(b: *std.build.Builder) void {
     run_kv_step.dependOn(&run_kv_cmd.step);
 
     // kv tests
-    const kv_tests = b.addTest("scratch/kv.zig");
+    const kv_tests = b.addTest("./src/storage.zig");
     kv_tests.setBuildMode(mode);
     kv_tests.linkLibC();
     kv_tests.linkSystemLibraryName("rocksdb");
