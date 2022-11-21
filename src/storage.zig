@@ -166,3 +166,17 @@ test "row deserialize" {
         try std.testing.expectEqualStrings(try row.get_by_name("text_test").?.as([]const u8), "bar");
     }
 }
+
+test "row serialize" {
+    // Row.fromValues, takes a slice of Values. Then you can write the bytes field.
+    // Actually it'sa bit awkward because Row holds a slice, not ArrayList, and I don't want Row to
+    // own its slice of bytes. So, I should just do a simple fn of writing a slice of Values to a
+    // resusable buffer (passed in as arg) and then RocksDb.set.
+    //
+    // serializeValuesToRowBytes(values: []const Value, buf: *ArrayList(u8), db: RocksDb) !void {}
+    //
+    // Row has to hold state, so it still makes more sense as a struct than as a fn, yes?
+    //
+    // Anyways, try this first, think later about whether the serialization/deserialization should
+    // look more parallel
+}
