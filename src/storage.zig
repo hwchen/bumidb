@@ -41,15 +41,28 @@ pub const Row = struct {
     /// Performs a linear scan to get value at column[idx] using iter
     /// Getting multiple columns w/out allocating should manually use
     /// iter.
-    pub fn get(self: Row, target_idx: []const usize) ?Value {
+    pub fn get(self: Row, target_idx: usize) ?Value {
         var it = self.iter();
-        var idx: usize = 0;
+        var skip_idx: usize = 0;
 
         // skip
-        while (target_idx < idx) {
-            it.next();
+        while (skip_idx < target_idx) {
+            _ = it.next() orelse return null;
+            skip_idx += 1;
         }
         return it.next();
+    }
+
+    pub fn get_by_name(self: Row, target_name: []const u8) ?Value {
+        const col_idx = blk: {
+            for (self.column_names) |col_name, i| {
+                if (std.mem.eql(u8, col_name, target_name)) {
+                    break :blk i;
+                }
+            }
+            return null;
+        };
+        return self.get(col_idx);
     }
 
     pub fn iter(self: Row) Iter {
@@ -114,10 +127,20 @@ test "row deserialize" {
             .column_names = &column_names,
             .column_kinds = &column_kinds,
         };
+
+        // check iter
         var row_iter = row.iter();
         try std.testing.expectEqual(try row_iter.next().?.as(bool), true);
         try std.testing.expectEqual(try row_iter.next().?.as(u8), 0);
         try std.testing.expectEqualStrings(try row_iter.next().?.as([]const u8), "foo");
+
+        // check get
+        try std.testing.expectEqual(try row.get(0).?.as(bool), true);
+        try std.testing.expectEqual(try row.get_by_name("is_test").?.as(bool), true);
+        try std.testing.expectEqual(try row.get(1).?.as(u8), 0);
+        try std.testing.expectEqual(try row.get_by_name("num_test").?.as(u8), 0);
+        try std.testing.expectEqualStrings(try row.get(2).?.as([]const u8), "foo");
+        try std.testing.expectEqualStrings(try row.get_by_name("text_test").?.as([]const u8), "foo");
     }
     // deserialize row 2
     // values: (false, 1, 'bar)
@@ -128,9 +151,18 @@ test "row deserialize" {
             .column_names = &column_names,
             .column_kinds = &column_kinds,
         };
+        // check iter
         var row_iter = row.iter();
         try std.testing.expectEqual(try row_iter.next().?.as(bool), false);
         try std.testing.expectEqual(try row_iter.next().?.as(u8), 1);
         try std.testing.expectEqualStrings(try row_iter.next().?.as([]const u8), "bar");
+
+        // check get
+        try std.testing.expectEqual(try row.get(0).?.as(bool), false);
+        try std.testing.expectEqual(try row.get_by_name("is_test").?.as(bool), false);
+        try std.testing.expectEqual(try row.get(1).?.as(u8), 1);
+        try std.testing.expectEqual(try row.get_by_name("num_test").?.as(u8), 1);
+        try std.testing.expectEqualStrings(try row.get(2).?.as([]const u8), "bar");
+        try std.testing.expectEqualStrings(try row.get_by_name("text_test").?.as([]const u8), "bar");
     }
 }
