@@ -9,17 +9,13 @@ pub fn build(b: *std.build.Builder) void {
     {
         const main_tests = b.addTest("src/main.zig");
         main_tests.setBuildMode(mode);
-
-        const storage_tests = b.addTest("./src/rocksdb.zig");
-        storage_tests.setBuildMode(mode);
-        storage_tests.linkLibC();
-        storage_tests.linkSystemLibraryName("rocksdb");
-        storage_tests.addLibraryPath("./rocksdb");
-        storage_tests.addIncludePath("./rocksdb/include");
+        main_tests.linkLibC();
+        main_tests.linkSystemLibraryName("rocksdb");
+        main_tests.addLibraryPath("./rocksdb");
+        main_tests.addIncludePath("./rocksdb/include");
 
         const test_step = b.step("test", "Run library tests");
         test_step.dependOn(&main_tests.step);
-        test_step.dependOn(&storage_tests.step);
     }
 
     // kv executable
