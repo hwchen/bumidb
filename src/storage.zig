@@ -1,4 +1,6 @@
-// TODO projections and joins
+// TODO
+// - projections and joins
+// - consolidate serialize/deserialize test to round-trip.
 
 //! # Row
 //!
@@ -212,6 +214,64 @@ pub fn serializeValuesToRowBytes(values: []const Value, buf: *ArrayList(u8)) !vo
     }
 }
 
+/// Originally thought to input a slice of Values and map that onto the buffer. However, using a slice of
+/// Values as an intermediate representation would require an allocation step since each Value would need
+/// an allocated slice.
+///
+/// However, allocation is more straightforward if we can manage to just allocate for the output buffer.
+///
+/// For the input, we'll read directly from src (and probably transferred from Token). This could be named
+/// a `Value` as we'll need to know the Kind and bytes, but we dont need to do so explicitly.
+///
+/// Since I don't want to take in a list of Tokens explicitly here, we just need to know the number of cols
+/// in the row, to reserve that space for the header. (They can be zeroed, w/ 0 representing null). (Taking
+/// Tokens as an input is only slightly more convenient for logic, but creates more coupling; just passing
+/// slices, kinds, and header_len is more "fundamental", and perhaps more flexible (it is easier to test)).
+/// I guess it's flexible enough to serialize from Tokens or Values.
+///
+/// Also, curious what this control is called; the caller controls each write call, instead of just passing
+/// in a list and letting the method take care of it. This way is more manual, and I think I've seen it in
+/// more low level code.
+const RowToBytes = struct {
+    /// Allocated outside to allow reuse across rows
+    buf: *ArrayList(u8),
+    /// u8 for now, not allowing rows longer than 256
+    value_bytes_idx: u8,
+
+    header_len: u8,
+    col_idx: u8,
+
+    const Self = @This();
+
+    fn init(header_len: u8, buf: *ArrayList(u8)) !Self {
+        buf.clearRetainingCapacity();
+        var i: usize = 0;
+        while (i < header_len) : (i += 1) {
+            try buf.append(0);
+        }
+        return .{
+            .buf = buf,
+            .value_bytes_idx = header_len,
+            .header_len = header_len,
+            .col_idx = 0,
+        };
+    }
+
+    // TODO should the bytes be from the src? Then conversion needs to take place w/in this method
+    fn write(self: *Self, kind: ?Value.Kind, bytes: []const u8) !void {
+        _ = kind;
+        if (self.col_idx >= self.header_len) {
+            return error.SerializeTooManyWrites;
+        }
+        self.buf.items[self.col_idx] = self.value_bytes_idx;
+
+        self.value_bytes_idx += @intCast(u8, bytes.len);
+        self.col_idx += 1;
+
+        try self.buf.appendSlice(bytes);
+    }
+};
+
 test "row serialize" {
     var buf = ArrayList(u8).init(std.testing.allocator);
     defer buf.deinit();
@@ -231,7 +291,12 @@ test "row serialize" {
         },
     };
 
-    try serializeValuesToRowBytes(&values, &buf);
+    var ser = try RowToBytes.init(3, &buf);
+    for (values) |value| {
+        try ser.write(null, value.bytes);
+    }
 
     try std.testing.expectEqualSlices(u8, buf.items, &[_]u8{ 3, 4, 5, 1, 0, 'f', 'o', 'o' });
+
+    try std.testing.expectError(error.SerializeTooManyWrites, ser.write(null, ""));
 }
