@@ -1,4 +1,15 @@
-// TODO projections ans joins
+// TODO projections and joins
+//
+// # Row
+//
+// Layout is header then the values, all sequentially. Header is indexes of value slices,
+// from the header start (not header end).
+//
+// This layout is better than encoding len next to value, so you don't have to iterate through
+// the entire row to get a projection.
+//
+// This layout is worse than working in blocks from top/bottom, since adding columns requires
+// shifting the entire slice. But I probably won't be implementing add columns anyways.
 
 const std = @import("std");
 const Allocator = std.Allocator;
@@ -35,22 +46,30 @@ pub const Row = struct {
     bytes: []const u8,
 
     // passed in from Table
+    // TODO collapse these into ColumnMetadata
     column_names: []const []const u8,
     column_kinds: []const Value.Kind,
 
-    /// Performs a linear scan to get value at column[idx] using iter
-    /// Getting multiple columns w/out allocating should manually use
-    /// iter.
     pub fn get(self: Row, target_idx: usize) ?Value {
-        var it = self.iter();
-        var skip_idx: usize = 0;
-
-        // skip
-        while (skip_idx < target_idx) {
-            _ = it.next() orelse return null;
-            skip_idx += 1;
+        if (target_idx >= self.column_names.len) {
+            return null;
         }
-        return it.next();
+
+        // index into bytes "header" to get the index of the value.
+        const value_start = self.bytes[target_idx];
+        const value_bytes = blk: {
+            if (target_idx == self.column_names.len - 1) {
+                break :blk self.bytes[value_start..];
+            } else {
+                const value_end = self.bytes[target_idx + 1];
+                break :blk self.bytes[value_start..value_end];
+            }
+        };
+
+        return Value{
+            .bytes = value_bytes,
+            .kind = self.column_kinds[target_idx],
+        };
     }
 
     pub fn get_by_name(self: Row, target_name: []const u8) ?Value {
@@ -71,21 +90,12 @@ pub const Row = struct {
 
     pub const Iter = struct {
         row: Row,
-        bytes_idx: usize = 0,
         column_idx: usize = 0,
 
         pub fn next(self: *Iter) ?Value {
-            const value_len = self.row.bytes[self.bytes_idx];
-            const value_bytes = self.row.bytes[self.bytes_idx + 1 .. self.bytes_idx + value_len + 1];
-            const kind = self.row.column_kinds[self.column_idx];
-
-            self.bytes_idx += value_len + 1;
+            const res = self.row.get(self.column_idx);
             self.column_idx += 1;
-
-            return Value{
-                .kind = kind,
-                .bytes = value_bytes,
-            };
+            return res;
         }
     };
 };
@@ -121,7 +131,7 @@ test "row deserialize" {
     // deserialize row 1
     // values: (true, 0, 'foo')
     {
-        const bytes = [_]u8{ 1, 1, 1, 0, 3, 'f', 'o', 'o' };
+        const bytes = [_]u8{ 3, 4, 5, 1, 0, 'f', 'o', 'o' };
         const row = Row{
             .bytes = &bytes,
             .column_names = &column_names,
@@ -145,7 +155,7 @@ test "row deserialize" {
     // deserialize row 2
     // values: (false, 1, 'bar)
     {
-        const bytes = [_]u8{ 1, 0, 1, 1, 3, 'b', 'a', 'r' };
+        const bytes = [_]u8{ 3, 4, 5, 0, 1, 'b', 'a', 'r' };
         const row = Row{
             .bytes = &bytes,
             .column_names = &column_names,
