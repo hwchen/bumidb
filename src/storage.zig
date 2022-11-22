@@ -1,18 +1,21 @@
 // TODO projections and joins
-//
-// # Row
-//
-// Layout is header then the values, all sequentially. Header is indexes of value slices,
-// from the header start (not header end).
-//
-// This layout is better than encoding len next to value, so you don't have to iterate through
-// the entire row to get a projection.
-//
-// This layout is worse than working in blocks from top/bottom, since adding columns requires
-// shifting the entire slice. But I probably won't be implementing add columns anyways.
+
+//! # Row
+//!
+//! Layout is header then the values, all sequentially. Header is indexes of value slices,
+//! from the header start (not header end).
+//!
+//! This layout is better than encoding len next to value, so you don't have to iterate through
+//! the entire row to get a projection.
+//!
+//! This layout is worse than working in blocks from top/bottom, since adding columns requires
+//! shifting the entire slice. But I probably won't be implementing add columns anyways.
+//!
+//! To keep things simple, Rows only work when 256 bytes or less (addressable by a u8 index)
 
 const std = @import("std");
 const Allocator = std.Allocator;
+const ArrayList = std.ArrayList;
 const RocksDb = @import("rocksdb.zig").RocksDb;
 
 pub const Storage = struct {
@@ -74,6 +77,7 @@ pub const Row = struct {
         };
     }
 
+    /// Not for general use, should prefer `get`
     pub fn get_by_name(self: Row, target_name: []const u8) ?Value {
         const col_idx = blk: {
             for (self.columns_metadata) |col_meta, i| {
@@ -189,16 +193,45 @@ test "row deserialize" {
     }
 }
 
+// Does it make more sense to have it as a fn here or as a method on Row somehow? Doesn't really matter,
+// can change later if necessary.
+pub fn serializeValuesToRowBytes(values: []const Value, buf: *ArrayList(u8)) !void {
+    buf.clearRetainingCapacity();
+
+    // write header
+    // only allow indexes to be u8 for now, to simplify things
+    var value_bytes_idx = @intCast(u8, values.len);
+    for (values) |value| {
+        try buf.append(value_bytes_idx);
+        value_bytes_idx += @intCast(u8, value.bytes.len);
+    }
+
+    // write values
+    for (values) |value| {
+        try buf.appendSlice(value.bytes);
+    }
+}
+
 test "row serialize" {
-    // Row.fromValues, takes a slice of Values. Then you can write the bytes field.
-    // Actually it'sa bit awkward because Row holds a slice, not ArrayList, and I don't want Row to
-    // own its slice of bytes. So, I should just do a simple fn of writing a slice of Values to a
-    // resusable buffer (passed in as arg) and then RocksDb.set.
-    //
-    // serializeValuesToRowBytes(values: []const Value, buf: *ArrayList(u8), db: RocksDb) !void {}
-    //
-    // Row has to hold state, so it still makes more sense as a struct than as a fn, yes?
-    //
-    // Anyways, try this first, think later about whether the serialization/deserialization should
-    // look more parallel
+    var buf = ArrayList(u8).init(std.testing.allocator);
+    defer buf.deinit();
+
+    const values = [_]Value{
+        .{
+            .kind = .boolean,
+            .bytes = &[_]u8{1}, // true
+        },
+        .{
+            .kind = .integer,
+            .bytes = &[_]u8{0}, // 0
+        },
+        .{
+            .kind = .text,
+            .bytes = "foo",
+        },
+    };
+
+    try serializeValuesToRowBytes(&values, &buf);
+
+    try std.testing.expectEqualSlices(u8, buf.items, &[_]u8{ 3, 4, 5, 1, 0, 'f', 'o', 'o' });
 }
