@@ -195,25 +195,6 @@ test "row deserialize" {
     }
 }
 
-// Does it make more sense to have it as a fn here or as a method on Row somehow? Doesn't really matter,
-// can change later if necessary.
-pub fn serializeValuesToRowBytes(values: []const Value, buf: *ArrayList(u8)) !void {
-    buf.clearRetainingCapacity();
-
-    // write header
-    // only allow indexes to be u8 for now, to simplify things
-    var value_bytes_idx = @intCast(u8, values.len);
-    for (values) |value| {
-        try buf.append(value_bytes_idx);
-        value_bytes_idx += @intCast(u8, value.bytes.len);
-    }
-
-    // write values
-    for (values) |value| {
-        try buf.appendSlice(value.bytes);
-    }
-}
-
 /// Originally thought to input a slice of Values and map that onto the buffer. However, using a slice of
 /// Values as an intermediate representation would require an allocation step since each Value would need
 /// an allocated slice.
