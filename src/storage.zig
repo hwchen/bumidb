@@ -38,27 +38,29 @@ pub const Storage = struct {
 pub const TableMetadata = struct {
     id: u32,
     name: []const u8,
-    column_names: []const []const u8,
-    column_kinds: []Value.Kind,
+    columns_metadata: []const ColumnMetadata,
+};
+
+pub const ColumnMetadata = struct {
+    name: []const u8,
+    kind: Value.Kind,
 };
 
 pub const Row = struct {
     bytes: []const u8,
 
     // passed in from Table
-    // TODO collapse these into ColumnMetadata
-    column_names: []const []const u8,
-    column_kinds: []const Value.Kind,
+    columns_metadata: []const ColumnMetadata,
 
     pub fn get(self: Row, target_idx: usize) ?Value {
-        if (target_idx >= self.column_names.len) {
+        if (target_idx >= self.columns_metadata.len) {
             return null;
         }
 
         // index into bytes "header" to get the index of the value.
         const value_start = self.bytes[target_idx];
         const value_bytes = blk: {
-            if (target_idx == self.column_names.len - 1) {
+            if (target_idx == self.columns_metadata.len - 1) {
                 break :blk self.bytes[value_start..];
             } else {
                 const value_end = self.bytes[target_idx + 1];
@@ -68,14 +70,14 @@ pub const Row = struct {
 
         return Value{
             .bytes = value_bytes,
-            .kind = self.column_kinds[target_idx],
+            .kind = self.columns_metadata[target_idx].kind,
         };
     }
 
     pub fn get_by_name(self: Row, target_name: []const u8) ?Value {
         const col_idx = blk: {
-            for (self.column_names) |col_name, i| {
-                if (std.mem.eql(u8, col_name, target_name)) {
+            for (self.columns_metadata) |col_meta, i| {
+                if (std.mem.eql(u8, col_meta.name, target_name)) {
                     break :blk i;
                 }
             }
@@ -125,8 +127,20 @@ test "row deserialize" {
     // - header: is_test, num_test, text_test
     // - kinds: bool, integer, text
 
-    const column_names = [_][]const u8{ "is_test", "num_test", "text_test" };
-    const column_kinds = [_]Value.Kind{ .boolean, .integer, .text };
+    const columns_metadata = [_]ColumnMetadata{
+        ColumnMetadata{
+            .name = "is_test",
+            .kind = .boolean,
+        },
+        ColumnMetadata{
+            .name = "num_test",
+            .kind = .integer,
+        },
+        ColumnMetadata{
+            .name = "text_test",
+            .kind = .text,
+        },
+    };
 
     // deserialize row 1
     // values: (true, 0, 'foo')
@@ -134,8 +148,7 @@ test "row deserialize" {
         const bytes = [_]u8{ 3, 4, 5, 1, 0, 'f', 'o', 'o' };
         const row = Row{
             .bytes = &bytes,
-            .column_names = &column_names,
-            .column_kinds = &column_kinds,
+            .columns_metadata = &columns_metadata,
         };
 
         // check iter
@@ -158,8 +171,7 @@ test "row deserialize" {
         const bytes = [_]u8{ 3, 4, 5, 0, 1, 'b', 'a', 'r' };
         const row = Row{
             .bytes = &bytes,
-            .column_names = &column_names,
-            .column_kinds = &column_kinds,
+            .columns_metadata = &columns_metadata,
         };
         // check iter
         var row_iter = row.iter();
