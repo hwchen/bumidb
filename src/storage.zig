@@ -18,13 +18,16 @@
 const std = @import("std");
 const Allocator = std.Allocator;
 const ArrayList = std.ArrayList;
+
 const RocksDb = @import("rocksdb.zig").RocksDb;
 
 pub const Storage = struct {
     rdb: RocksDb,
     alloc: Allocator,
+    // u8 for now
+    next_table_id: u8,
 
-    const tableMetadataPrefix = "_tbl_";
+    const table_metadata_prefix = "_tmeta_";
 
     pub fn init(db_path: [:0]const u8, alloc: Allocator) !Storage {
         return .{
@@ -32,24 +35,53 @@ pub const Storage = struct {
             .alloc = alloc,
         };
     }
+
     pub fn deinit(self: Storage) void {
         self.rdb.close();
     }
-    pub fn createTable() void {}
+
+    /// Creates a table by setting a row w/ table metadata.
+    pub fn createTable(self: Storage, name: []const u8, columns: []const []const u8) void {
+        const table_id = self.next_table_id;
+        self.next_table_id += 1; // don't worry about overflow for now
+        const key_buf = ArrayList(u8).init(self.alloc);
+        defer key_buf.deinit();
+        var key_wtr = key_buf.writer();
+        key_wtr.print("{}{}", .{ table_metadata_prefix, table_id });
+
+        const value_buf = ArrayList(u8).init(self.alloc);
+        const table_metadata = TableMetadata{
+            .id = table_id,
+            .name = name,
+            .columns = columns,
+        };
+        try table_metadata.to_bytes(value_buf);
+
+        try self.rdb.set(key_buf.items, value_buf.items);
+    }
     pub fn tableMetadata() void {}
+    pub fn insertRows() void {}
     pub fn scanTable() void {}
 };
 
 pub const TableMetadata = struct {
-    id: u32,
-    name: []const u8,
-    columns_metadata: []const ColumnMetadata,
+    bytes: []const u8,
+
+    pub fn id() u8 {}
+    pub fn name() []const u8 {}
+    pub fn columns_metadata() []const ColumnMetadata {}
 };
 
+pub const TableMetadataToBytes = struct {};
+
 pub const ColumnMetadata = struct {
-    name: []const u8,
-    kind: Value.Kind,
+    bytes: []const u8,
+
+    pub fn name() []const u8 {}
+    pub fn kind() Value.Kind {}
 };
+
+pub const ColumnMetadataToBytes = struct {};
 
 pub const Row = struct {
     bytes: []const u8,

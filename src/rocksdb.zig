@@ -100,7 +100,7 @@ pub const RocksDb = struct {
         return val[0..val_len];
     }
 
-    pub fn set(self: Self, key: [:0]const u8, value: [:0]const u8) !void {
+    pub fn set(self: Self, key: []const u8, value: []const u8) !void {
         var err: ?[*:0]u8 = null;
         rdb.rocksdb_put(
             self.db,
